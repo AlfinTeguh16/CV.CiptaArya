@@ -5,6 +5,7 @@ use Illuminate\Http\Request;
 use App\Models\TransaksiDraftPekerjaan;
 use App\Models\DraftPekerjaan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class TransaksiDraftPekerjaanController extends Controller
 {
@@ -40,7 +41,7 @@ class TransaksiDraftPekerjaanController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            'draft_pekerjaan_id' => 'required|exists:tb_draft_pekerjaan,id|unique:tb_tansaksi_draft_pekerjaan,draft_pekerjaan_id',
+            'draft_pekerjaan_id' => 'required|exists:tb_draft_pekerjaan,id',
             'nilai_pekerjaan' => 'required|numeric|min:0',
             'nilai_dpp' => 'required|numeric|min:0',
             'nilai_ppn' => 'required|numeric|min:0',
@@ -48,10 +49,28 @@ class TransaksiDraftPekerjaanController extends Controller
             'nilai_bersih_pekerjaan' => 'required|numeric|min:0',
         ]);
 
+        // Cek duplikasi manual dengan pengecualian jika is_deleted = 1
+        $isDuplicate = TransaksiDraftPekerjaan::where('draft_pekerjaan_id', $request->draft_pekerjaan_id)
+            ->where('nilai_pekerjaan', $request->nilai_pekerjaan)
+            ->where('nilai_dpp', $request->nilai_dpp)
+            ->where('nilai_ppn', $request->nilai_ppn)
+            ->where('nilai_pph_final', $request->nilai_pph_final)
+            ->where('nilai_bersih_pekerjaan', $request->nilai_bersih_pekerjaan)
+            ->where('is_deleted', 0)
+            ->exists();
+
+        if ($isDuplicate) {
+            return back()->withInput()->withErrors([
+                'duplicate' => 'Data transaksi dengan nilai dan draft pekerjaan yang sama sudah pernah diinput.',
+            ]);
+        }
+
+        // Simpan data
         TransaksiDraftPekerjaan::create($request->all());
 
         return redirect()->route('transaksi-draft-pekerjaan.index')->with('success', 'Transaksi berhasil disimpan!');
     }
+
 
     public function edit($id)
     {
@@ -60,23 +79,44 @@ class TransaksiDraftPekerjaanController extends Controller
         return view('activities.transaksi-draft-pekerjaan.edit', compact('transaksi', 'drafts'));
     }
 
-    public function update(Request $request, $id)
-    {
-        $transaksi = TransaksiDraftPekerjaan::findOrFail($id);
 
-        $request->validate([
-            'draft_pekerjaan_id' => 'required|exists:tb_draft_pekerjaan,id|unique:tb_tansaksi_draft_pekerjaan,draft_pekerjaan_id,' . $id,
-            'nilai_pekerjaan' => 'required|numeric|min:0',
-            'nilai_dpp' => 'required|numeric|min:0',
-            'nilai_ppn' => 'required|numeric|min:0',
-            'nilai_pph_final' => 'required|numeric|min:0',
-            'nilai_bersih_pekerjaan' => 'required|numeric|min:0',
-        ]);
 
-        $transaksi->update($request->all());
+        public function update(Request $request, $id)
+        {
+            try {
+                $transaksi = TransaksiDraftPekerjaan::findOrFail($id);
+                Log::info('Mulai proses update TransaksiDraftPekerjaan', ['id' => $id]);
 
-        return redirect()->route('transaksi-draft-pekerjaan.index')->with('success', 'Transaksi berhasil diperbarui!');
-    }
+                $request->validate([
+                    'draft_pekerjaan_id' => 'required|exists:tb_draft_pekerjaan,id|unique:tb_tansaksi_draft_pekerjaan,draft_pekerjaan_id,' . $id,
+                    'nilai_pekerjaan' => 'required|numeric|min:0',
+                    'nilai_dpp' => 'required|numeric|min:0',
+                    'nilai_ppn' => 'required|numeric|min:0',
+                    'nilai_pph_final' => 'required|numeric|min:0',
+                    'nilai_bersih_pekerjaan' => 'required|numeric|min:0',
+                ]);
+
+                $transaksi->update($request->all());
+
+                Log::info('Berhasil update TransaksiDraftPekerjaan', [
+                    'id' => $id,
+                    'data' => $request->all()
+                ]);
+
+                return redirect()->route('transaksi-draft-pekerjaan.index')
+                    ->with('success', 'Transaksi berhasil diperbarui!');
+            } catch (\Exception $e) {
+                Log::error('Gagal update TransaksiDraftPekerjaan', [
+                    'id' => $id,
+                    'error' => $e->getMessage()
+                ]);
+
+                return redirect()->back()
+                    ->with('failed', 'Terjadi kesalahan saat mengupdate data.')
+                    ->withInput();
+            }
+        }
+
 
     public function show($id)
     {
